@@ -1,0 +1,98 @@
+#!/bin/bash
+cwd = $(pwd)
+
+# Color output
+put_info() {
+	printf "$(tput bold)$(tput setab 4)$(tput setaf 7)${1}$(tput sgr 0)\n"
+}
+
+put_fault() {
+	printf "\e[31m${1}\e[0m\n"
+}
+
+# Generate the ROS program
+put_info "Test {{.Test_name}}: Generating program..."
+{{.Generate_directory}}/rosgraph --rules-data='{{.App_rules}}' {{ if .Is_custom_timing }}--timing-data='{{.App_timing}}'{{end}}
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+	put_fault "Test {{.Test_name}} failed to generate..."
+	exit $exit_code
+fi
+
+# Check if the program directory already exists
+if [ -d "{{.Workspace_directory}}/src/{{.App_name}}" ]; then
+	echo -n "The directory {{.Workspace_directory}}/src/{{.App_name}} already exists. Remove and proceed? (y/n): "
+	read answer
+	if [ "$answer" != "${answer#[Yy]}" ] ;then
+		put_info "Okay, deleting and proceeding..."
+		rm -rf {{.Workspace_directory}}/src/{{.App_name}}
+	else
+		exit 0
+	fi
+fi
+
+# Move the generated program
+put_info "Test {{.Test_name}}: Moving to {{.Workspace_directory}}/src/{{.App_name}}"
+mv {{.Generate_directory}}/{{.App_name}} {{.Workspace_directory}}/src/{{.App_name}}
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+	put_fault "Test {{.Test_name}}: Unable to move the program to the workspace"
+	exit $exit_code
+fi
+
+# Source ROS scripts
+put_info "Test {{.Test_name}}: Sourcing ROS scripts..."
+. {{.ROS_directory}}/install/setup.sh
+
+# Build the program (should be in workspace directory)
+put_info "Test {{.Test_name}}: Building program with Colcon..."
+cd {{.Workspace_directory}}
+colcon build --packages-select {{.App_name}} --symlink-install
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+	put_fault "Test {{.Test_name}}: Unable to build the program with Colcon"
+	exit $exit_code
+fi
+
+# Source local scripts
+put_info "Test {{.Test_name}}: Re-sourcing local setup..."
+. {{.Workspace_directory}}/install/setup.sh
+
+# Create the logfile, or wipe it clean if it already exists
+put_info "Test {{.Test_name}}: Resetting the logfile..."
+truncate -s 0 {{.Logfile_directory}}/{{.Logfile_name}}
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+	put_fault "Test {{.Test_name}}: Unable to reset logfile..."
+	exit $exit_code
+fi
+
+# Run the program using launch, and guard it with a timeout (so it doesn't get stuck)
+{{- if .Is_duration}}
+put_info "Test {{.Test_name}}: Launching program with a timeout of {{.Duration_s}}..."
+timeout --signal=SIGINT {{.Duration_s}}s ros2 launch {{.Workspace_directory}}/src/{{.App_name}}/launch/{{.App_name}}_launch.py
+{{- else}}
+put_info "Test {{.Test_name}}: Launching program with no timeout..."
+ros2 launch {{.Workspace_directory}}/src/{{.App_name}}/launch/{{.App_name}}_launch.py
+{{- end}}
+
+# Check exit code (expected code 0 or 2)
+exit_code=$?
+if [ $exit_code -ne 2 ] && [$exit_code -ne 0 ]; then
+    put_fault "Test {{.Test_name}}: An exception occurred when executing the ROS application"
+    exit $exit_code
+fi
+put_info "Test {{.Test_name}}: Completed successfully"
+
+# Remove the program
+rm -rf {{.Workspace_directory}}/src/{{.App_name}}
+
+# Remove the build
+rm -rf {{.Workspace_directory}}/build/{{.App_name}}
+
+# Exit the workspace directory
+cd $cwd
+
+# Extract the log results, run them through the analysis, and store the file
+put_info "Test {{.Test_name}}: Analysing the results..."
+{{.Analysis_directory}}/postprocess {{.Generate_directory}}/chains.json {{.Logfile_directory}}/{{.Logfile_name}} > {{.Results_directory}}/{{.Test_name}}.txt
