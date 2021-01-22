@@ -36,6 +36,8 @@ type Test struct {
 	Results_directory   string    // Directory in which results should be put
 	Logfile_directory   string    // Name of directory in which logs are placed
 	Logfile_name        string    // Name of the logfile to use for analysis
+	Postprocess         bool      // Conduct post processing
+	Reset_logging       bool      // Wipe logfile before use
 }
 
 // Describes all necessary directories for running the test
@@ -57,7 +59,7 @@ type Environment struct {
 
 // Performs a test with the given name, using supplied rules and environment
 // configuration
-func Maketest (name, path string, rules types.Rules, is_custom_timing bool,
+func Maketest (name, path string, rules types.Rules, is_custom_timing, postprocess, reset_logging bool,
 	timing []temporal.Temporal, environment Environment) error {
 	var rules_data []byte
 	var timing_data []byte
@@ -97,6 +99,8 @@ func Maketest (name, path string, rules types.Rules, is_custom_timing bool,
 		Results_directory:   environment.Results_directory,
 		Logfile_directory:   environment.Logfile_directory,
 		Logfile_name:        environment.Logfile_name,
+		Postprocess:         postprocess,
+		Reset_logging:       reset_logging,
 	}
 
 	return gen.GenerateTemplate(test, "/home/micrified/Go/src/maketest/templates/autotest.tmpl", path + "/" + name + ".sh")

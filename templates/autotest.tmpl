@@ -59,6 +59,7 @@ put_info "Test {{.Test_name}}: Re-sourcing local setup..."
 . {{.Workspace_directory}}/install/setup.sh
 
 # Create the logfile, or wipe it clean if it already exists
+{{- if .Reset_logging}}
 put_info "Test {{.Test_name}}: Resetting the logfile..."
 truncate -s 0 {{.Logfile_directory}}/{{.Logfile_name}}
 exit_code=$?
@@ -66,6 +67,7 @@ if [ $exit_code -ne 0 ]; then
 	put_fault "Test {{.Test_name}}: Unable to reset logfile..."
 	exit $exit_code
 fi
+{{- end}}
 
 # Run the program using launch, and guard it with a timeout (so it doesn't get stuck)
 {{- if .Is_duration}}
@@ -78,11 +80,12 @@ ros2 launch {{.Workspace_directory}}/src/{{.App_name}}/launch/{{.App_name}}_laun
 
 # Check exit code (expected code 0 or 2)
 exit_code=$?
-if [ $exit_code -ne 2 ] && [$exit_code -ne 0 ]; then
-    put_fault "Test {{.Test_name}}: An exception occurred when executing the ROS application"
-    exit $exit_code
+if [ $exit_code -ne 2 ] && [ $exit_code -ne 0 ]; then
+    put_fault "Test {{.Test_name}}: An exception occurred when executing the ROS application (Not 0, SIGINT), possibly SIGTERM"
+    echo "{{.Test_name}} $exit_code" >> faults.txt
+else
+	put_info "Test {{.Test_name}}: Completed successfully (possibly with SIGINT or SIGTERM)"
 fi
-put_info "Test {{.Test_name}}: Completed successfully"
 
 # Remove the program
 rm -rf {{.Workspace_directory}}/src/{{.App_name}}
@@ -90,9 +93,20 @@ rm -rf {{.Workspace_directory}}/src/{{.App_name}}
 # Remove the build
 rm -rf {{.Workspace_directory}}/build/{{.App_name}}
 
+# Remove the install
+rm -rf {{.Workspace_directory}}/install/{{.App_name}}
+
 # Exit the workspace directory
 cd $cwd
 
+# Exit without processing results, if a error occurred
+if [ $exit_code -ne 2 ] && [ $exit_code -ne 0 ] && [ $exit_code -ne 124 ]; then
+	put_fault "Exiting test without post-processing due to previous fault..."
+	exit $exit_code
+fi
+
 # Extract the log results, run them through the analysis, and store the file
+{{- if .Postprocess }}
 put_info "Test {{.Test_name}}: Analysing the results..."
 {{.Analysis_directory}}/postprocess {{.Generate_directory}}/chains.json {{.Logfile_directory}}/{{.Logfile_name}} > {{.Results_directory}}/{{.Test_name}}.txt
+{{- end}}
